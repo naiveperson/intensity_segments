@@ -7,67 +7,72 @@ intensity_segments.py
 
 This module implements the IntensitySegments class, which manages intensity values over infinite intervals.
 It allows adding and setting intensity values in given ranges, starting from an initial intensity of 0,
-using a SortedDict for efficient and clean updates.
+using list as internal storage and binary search wherever necessary for efficient updates.
+The current time complexity is O(n) on average, advanced data structure like Skip List or AVL tree can be used for better performance.
 
 Author: Nian Li
 Date: 2025-04-17
 Email: linian2017t1@gmail.com
 """
 
-from sortedcontainers import SortedDict
-
 class IntensitySegments:
     """
-    A class to manage and update intensity values across continuous segments.
+    Manage intensity values across continuous segments using sorted list and binary search.
 
     Attributes:
-        segments (SortedDict[int, int]): A sorted dictionary mapping start points to intensity values.
+        segments (list[list[int, int]]): Sorted list of [start, intensity].
 
     Methods:
         add(from_, to, amount):
-            Adds an intensity amount to the specified range [from_, to).
+            Adds intensity amount to range [from_, to).
 
         set(from_, to, amount):
-            Sets the intensity to a specific value for the specified range [from_, to).
+            Sets intensity to amount for range [from_, to).
 
         __str__():
-            Returns a compact string representation of the current segments.
+            Returns a compact string representation of the segments.
     """
 
     def __init__(self) -> None:
         """
-        Initialize the IntensitySegments with an empty sorted dictionary of segments.
+        Initialize an empty list of segments.
         """
-        self.segments: SortedDict[int, int] = SortedDict()
+        self.segments: list[list[int, int]] = []
+
+    def _find_index(self, point: int) -> int:
+        """
+        Binary search to find the index of the first segment whose start >= point.
+        """
+        lo, hi = 0, len(self.segments)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if self.segments[mid][0] < point:
+                lo = mid + 1
+            else:
+                hi = mid
+        return lo
 
     def _ensure_point(self, point: int) -> None:
         """
-        Helper to ensure a point exists in the segments.
-
-        If the point is not already a start point, copy intensity from the previous segment.
+        Ensure that a segment starting at 'point' exists.
+        If not, insert it with the correct intensity.
         """
-        if point not in self.segments:
-            if not self.segments:
-                self.segments[point] = 0
-            else:
-                idx = self.segments.bisect_left(point)
-                if idx == 0:
-                    self.segments[point] = 0
-                else:
-                    prev_key = list(self.segments.keys())[idx - 1]
-                    self.segments[point] = self.segments[prev_key]
+        idx = self._find_index(point)
+
+        if idx < len(self.segments) and self.segments[idx][0] == point:
+            return  # Already exists
+
+        value = 0 if idx == 0 else self.segments[idx - 1][1]
+        self.segments.insert(idx, [point, value])
 
     def add(self, from_: int, to: int, amount: int) -> None:
         """
-        Add an intensity amount to the specified range [from_, to).
+        Add intensity amount to range [from_, to).
 
         Args:
             from_ (int): Start of the range (inclusive).
             to (int): End of the range (exclusive).
-            amount (int): Amount to add to the intensity.
-
-        Returns:
-            None
+            amount (int): Amount to add.
         """
         if from_ >= to:
             return
@@ -75,23 +80,21 @@ class IntensitySegments:
         self._ensure_point(from_)
         self._ensure_point(to)
 
-        keys = list(self.segments.irange(from_, to, inclusive=(True, False)))
-        for key in keys:
-            self.segments[key] += amount
+        idx = self._find_index(from_)
+        while idx < len(self.segments) and self.segments[idx][0] < to:
+            self.segments[idx][1] += amount
+            idx += 1
 
-        self._cleanup()
+        self._cleanup_local(from_, to)
 
     def set(self, from_: int, to: int, amount: int) -> None:
         """
-        Set the intensity to a specific value for the specified range [from_, to).
+        Set intensity to a fixed amount over range [from_, to).
 
         Args:
             from_ (int): Start of the range (inclusive).
             to (int): End of the range (exclusive).
-            amount (int): New intensity value to set.
-
-        Returns:
-            None
+            amount (int): New intensity value.
         """
         if from_ >= to:
             return
@@ -99,40 +102,52 @@ class IntensitySegments:
         self._ensure_point(from_)
         self._ensure_point(to)
 
-        keys = list(self.segments.irange(from_, to, inclusive=(True, False)))
-        for key in keys:
-            self.segments[key] = amount
+        idx = self._find_index(from_)
+        while idx < len(self.segments) and self.segments[idx][0] < to:
+            self.segments[idx][1] = amount
+            idx += 1
 
-        self._cleanup()
+        self._cleanup_local(from_, to)
 
-    def _cleanup(self) -> None:
+    def _cleanup_local(self, from_: int, to: int) -> None:
         """
-        Merge adjacent segments with the same intensity to keep the representation compact.
-        Remove unnecessary [start, 0] segments at the beginning.
+        Locally merge segments between from_ and to to keep representation compact,
+        and correctly remove redundant zero intensity segments.
         """
-        prev_key = None
-        keys_to_delete = []
+        if not self.segments:
+            return
 
-        for key in self.segments.keys():
-            if prev_key is not None and self.segments[prev_key] == self.segments[key]:
-                keys_to_delete.append(key)
-            else:
-                prev_key = key
+        start_idx = max(self._find_index(from_) - 1, 0)
+        end_idx = min(self._find_index(to), len(self.segments))
 
-        for key in keys_to_delete:
-            del self.segments[key]
+        cleaned = self.segments[:start_idx+1]
 
-        # Additional cleanup: if the first segment is [x, 0] and it's unnecessary, remove it
-        keys = list(self.segments.keys())
-        if keys and keys[0] != 0 and self.segments[keys[0]] == 0:
-            del self.segments[keys[0]]
+        i = start_idx + 1
+        while i < end_idx:
+            if cleaned and cleaned[-1][1] == self.segments[i][1]:
+                i += 1
+                continue
+            cleaned.append(self.segments[i])
+            i += 1
+
+        cleaned.extend(self.segments[end_idx:])
+
+        # Remove unnecessary leading zeros
+        while len(cleaned) > 1 and cleaned[0][1] == 0:
+            cleaned.pop(0)
+
+        # Remove unnecessary ending zeros (keep the last one)
+        while len(cleaned) > 1 and cleaned[-1][1] == 0 and cleaned[-2][1] == 0:
+            cleaned.pop()
+
+        self.segments = cleaned
+
 
     def __str__(self) -> str:
         """
-        Return a compact string representation of the current segments.
+        Return a string representation of the segments.
 
         Returns:
-            str: String formatted list of [start, intensity] pairs.
+            str: List of [start, intensity] pairs.
         """
-        items = [[k, v] for k, v in self.segments.items()]
-        return str(items)
+        return str(self.segments)

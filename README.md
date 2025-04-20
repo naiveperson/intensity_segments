@@ -12,7 +12,6 @@ The module supports three main operations:
 ## Requirements
 
 - Python 3.8 or higher
-- sortedcontainers (for SortedDict)
 - pytest (for running tests)
 
 Make sure you have Python 3.8+ installed.  
@@ -61,7 +60,6 @@ The tests cover:
 ## Notes
 
 - All intensity values start from 0.
-- Internally, a `SortedDict` is used to manage the segments efficiently.
 - The implementation automatically merges adjacent segments with identical intensity values for compactness.
 - Empty or invalid ranges (where `from_ >= to`) are ignored safely.
 
